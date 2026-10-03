@@ -1,0 +1,19 @@
+name: "sealscan"
+description: "Local-only scan for secrets, insecure code and license risks"
+inputs:
+  path:
+    description: "Path to scan"
+    default: "."
+  fail-on:
+    description: "Fail when a finding is at or above this severity"
+    default: "high"
+runs:
+  using: "composite"
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+    - run: pip install sealscan
+      shell: bash
+    - run: sealscan "${{ inputs.path }}" --fail-on "${{ inputs.fail-on }}"
+      shell: bash

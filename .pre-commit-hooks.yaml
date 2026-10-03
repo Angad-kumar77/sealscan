@@ -1,0 +1,7 @@
+- id: sealscan
+  name: sealscan
+  description: Scan for hardcoded secrets, insecure code and license risks
+  entry: sealscan .
+  language: python
+  pass_filenames: false
+  always_run: true
