@@ -87,6 +87,17 @@ class SecretTests(Base):
         self.write("a.py", 'k = "%s"  # sealscan:ignore\n' % AWS_KEY)
         self.assertEqual(self.run_scan().findings, [])
 
+    def test_new_secret_providers(self):
+        self.write("a.py",
+                    'twilio = "SK' + "a" * 32 + '"\n'
+                    'mailgun = "key-' + "b" * 32 + '"\n'
+                    'webhook = "https://discord.com/api/webhooks/123456789012345678/'
+                    'abcDEF-123_xyz"\n'
+                    'telegram = "123456789:' + "A" * 35 + '"\n')
+        ids = self.ids(self.run_scan())
+        self.assertTrue({"SECRET-TWILIO-KEY", "SECRET-MAILGUN-KEY",
+                          "SECRET-DISCORD-WEBHOOK", "SECRET-TELEGRAM-BOT-TOKEN"} <= ids)
+
 
 class VulnTests(Base):
     def test_python_rules(self):
@@ -111,6 +122,62 @@ class VulnTests(Base):
         (self.root / "a.js").unlink()
         self.write("a.py", "el.innerHTML = x\n")
         self.assertEqual(self.run_scan().findings, [])
+
+    def test_java_rules(self):
+        self.write("Main.java", 'Runtime.getRuntime().exec(cmd);\n'
+                                 'MessageDigest.getInstance("MD5");\n')
+        ids = self.ids(self.run_scan())
+        self.assertTrue({"VULN-JAVA-RUNTIME-EXEC", "VULN-JAVA-WEAK-HASH"} <= ids)
+
+    def test_go_rules(self):
+        self.write("main.go", 'exec.Command("sh", "-c", cmd)\n'
+                               'InsecureSkipVerify: true,\n')
+        ids = self.ids(self.run_scan())
+        self.assertTrue({"VULN-GO-EXEC-COMMAND", "VULN-GO-TLS-VERIFY-OFF"} <= ids)
+
+
+class ConfigTests(Base):
+    def test_dockerfile_latest_tag_and_no_user(self):
+        self.write("Dockerfile", "FROM python:latest\nCMD [\"app\"]\n")
+        ids = self.ids(self.run_scan())
+        self.assertIn("CONFIG-DOCKER-LATEST-TAG", ids)
+        self.assertIn("CONFIG-DOCKER-NO-USER", ids)
+
+    def test_dockerfile_with_user_is_not_flagged(self):
+        self.write("Dockerfile", "FROM python:3.12-slim\nUSER appuser\nCMD [\"app\"]\n")
+        self.assertNotIn("CONFIG-DOCKER-NO-USER", self.ids(self.run_scan()))
+
+    def test_compose_privileged_and_docker_sock(self):
+        self.write("docker-compose.yml",
+                    "services:\n  app:\n    privileged: true\n"
+                    "    volumes:\n      - /var/run/docker.sock:/var/run/docker.sock\n")
+        ids = self.ids(self.run_scan())
+        self.assertIn("CONFIG-COMPOSE-PRIVILEGED", ids)
+        self.assertIn("CONFIG-COMPOSE-DOCKER-SOCK", ids)
+
+    def test_cors_wildcard(self):
+        self.write("app.py", 'CORS(app, origins="*")\n')
+        self.assertIn("CONFIG-CORS-WILDCARD", self.ids(self.run_scan()))
+
+    def test_category_filter_excludes_config(self):
+        self.write("Dockerfile", "FROM python:latest\n")
+        ids = self.ids(self.run_scan(categories={"secret"}))
+        self.assertNotIn("CONFIG-DOCKER-LATEST-TAG", ids)
+
+
+class DependencyTests(Base):
+    def test_requirements_pinned_vs_unpinned(self):
+        self.write("requirements.txt", "flask\nrequests==2.31.0\ndjango>=4.0\nnumpy*\n")
+        findings = {f.snippet: f.rule_id for f in self.run_scan().findings}
+        self.assertEqual(findings.get("flask"), "DEPENDENCY-UNPINNED-VERSION")
+        self.assertNotIn("requests==2.31.0", findings)
+        self.assertNotIn("django>=4.0", findings)
+        self.assertEqual(findings.get("numpy*"), "DEPENDENCY-WILDCARD-VERSION")
+
+    def test_package_json_wildcard(self):
+        self.write("package.json", json.dumps({"dependencies": {"left-pad": "*", "lodash": "^4.17.0"}}))
+        ids = self.ids(self.run_scan())
+        self.assertIn("DEPENDENCY-WILDCARD-VERSION", ids)
 
 
 class LicenseTests(Base):

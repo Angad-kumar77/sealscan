@@ -7,8 +7,9 @@ one pass.
 - **100% local.** No network calls, no telemetry, no accounts. Files are read
   in memory and nothing is uploaded or stored.
 - **Zero dependencies.** Standard library only.
-- **One engine for two problems.** Leaked secrets (API keys, tokens, private
-  keys) and commercially risky licenses (AGPL, GPL, SSPL, ...) in a single scan.
+- **Five categories in one engine.** Leaked secrets, insecure code (Python,
+  JavaScript, Java, Go), risky licenses, risky container/CORS config, and
+  unpinned dependency versions — in a single scan.
 - **CI friendly.** Exit codes, JSON and SARIF output, pre-commit hook.
 
 ## Install
@@ -59,9 +60,11 @@ Secret values are always redacted in every output format.
 
 | Category | Examples |
 |---|---|
-| `secret` | AWS, GitHub, GitLab, Slack, Stripe, Google, SendGrid, npm, OpenAI and Anthropic keys, private key blocks, JWTs, passwords in URLs, hardcoded credentials, committed `.env` and key files |
-| `vulnerability` | `eval`/`exec`, `shell=True`, `os.system`, unsafe `pickle`/`yaml.load`, weak hashes, disabled TLS verification, SQL built with string formatting, JavaScript `innerHTML`, `document.write`, `child_process.exec` |
+| `secret` | AWS, GitHub, GitLab, Slack, Stripe, Google, SendGrid, npm, OpenAI, Anthropic, Twilio, Mailgun, Heroku, Azure, PayPal/Braintree, Discord and Telegram keys/tokens, private key blocks, JWTs, passwords in URLs, hardcoded credentials, committed `.env` and key files |
+| `vulnerability` | Python: `eval`/`exec`, `shell=True`, `os.system`, unsafe `pickle`/`yaml.load`, weak hashes, disabled TLS verification, SQL built with string formatting. JavaScript: `innerHTML`, `document.write`, `child_process.exec`. Java: `Runtime.exec`, unsafe deserialization, weak hashes, trust-all TLS, concatenated SQL. Go: shell `exec.Command`, weak hashes, disabled TLS verification, `fmt.Sprintf` SQL |
 | `license` | AGPL, SSPL, GPL, LGPL, EUPL, BUSL and NonCommercial licenses found in `LICENSE` files, SPDX headers, and `package.json`, `composer.json`, `pyproject.toml`, `setup.py`, `setup.cfg`, `Cargo.toml` |
+| `config` | Dockerfiles pinned to `:latest`, no `USER` instruction (root), `ADD` from a remote URL; docker-compose `privileged: true`, host networking, a mounted Docker socket; wildcard CORS origins |
+| `dependency` | Unpinned versions in `requirements.txt`; wildcard/`latest` versions in `requirements.txt` and `package.json` |
 
 Run `sealscan --list-rules` for the full list.
 

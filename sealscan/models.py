@@ -3,7 +3,7 @@ from dataclasses import dataclass, asdict
 from typing import Any, Dict, List, Optional
 
 SEVERITY_ORDER = {"low": 1, "medium": 2, "high": 3, "critical": 4}
-CATEGORIES = ("secret", "vulnerability", "license")
+CATEGORIES = ("secret", "vulnerability", "license", "config", "dependency")
 
 
 @dataclass(frozen=True)
@@ -17,6 +17,7 @@ class Rule:
     spdx: Optional[Any] = None      # compiled regex for SPDX ids (license rules)
     exts: Optional[frozenset] = None  # restrict to these file extensions
     generic: bool = False           # generic rules get value checks and yield to specific ones
+    names: Optional[frozenset] = None  # restrict to these exact lowercase filenames
 
 
 @dataclass

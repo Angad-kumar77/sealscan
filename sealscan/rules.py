@@ -6,6 +6,14 @@ from sealscan.models import Rule
 
 PY = frozenset({".py"})
 JS = frozenset({".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"})
+JAVA = frozenset({".java"})
+GO = frozenset({".go"})
+
+DOCKERFILE_NAMES = frozenset({"dockerfile"})
+COMPOSE_NAMES = frozenset({
+    "docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml",
+})
+DEPENDENCY_MANIFESTS = frozenset({"requirements.txt", "package.json"})
 
 # --------------------------------------------------------------------------
 # Secrets
@@ -50,6 +58,31 @@ SECRET_RULES = [
     Rule("SECRET-JWT", "JSON Web Token", "medium", "secret",
          "JSON Web Token found",
          re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b")),
+    Rule("SECRET-TWILIO-KEY", "Twilio API key", "critical", "secret",
+         "Twilio API key found",
+         re.compile(r"\bSK[0-9a-fA-F]{32}\b")),
+    Rule("SECRET-MAILGUN-KEY", "Mailgun API key", "high", "secret",
+         "Mailgun API key found",
+         re.compile(r"\bkey-[0-9a-f]{32}\b")),
+    Rule("SECRET-HEROKU-API-KEY", "Heroku API key", "high", "secret",
+         "Heroku API key found",
+         re.compile(r"(?i)heroku[_-]?api[_-]?key[\w.-]*['\"]?\s*[:=]\s*['\"]"
+                    r"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})['\"]")),
+    Rule("SECRET-AZURE-STORAGE-KEY", "Azure storage account key", "critical", "secret",
+         "Azure storage account key found",
+         re.compile(r"\bAccountKey=[A-Za-z0-9+/]{80,}={0,2}")),
+    Rule("SECRET-PAYPAL-BRAINTREE-TOKEN", "PayPal/Braintree access token", "critical", "secret",
+         "PayPal/Braintree access token found",
+         re.compile(r"\baccess_token\$production\$[0-9a-z]{16}\$[0-9a-f]{32}\b")),
+    Rule("SECRET-DISCORD-BOT-TOKEN", "Discord bot token", "critical", "secret",
+         "Discord bot token found",
+         re.compile(r"\b[MN][A-Za-z\d]{23}\.[\w-]{6}\.[\w-]{27}\b")),
+    Rule("SECRET-DISCORD-WEBHOOK", "Discord webhook URL", "high", "secret",
+         "Discord webhook URL found",
+         re.compile(r"https://discord(?:app)?\.com/api/webhooks/\d+/[\w-]+")),
+    Rule("SECRET-TELEGRAM-BOT-TOKEN", "Telegram bot token", "high", "secret",
+         "Telegram bot token found",
+         re.compile(r"\b\d{8,10}:[A-Za-z0-9_-]{35}\b")),
     # Generic rules run last and are skipped when a specific rule already matched.
     Rule("SECRET-URL-CREDENTIALS", "Credentials in URL", "high", "secret",
          "Password embedded in a connection string or URL",
@@ -139,7 +172,77 @@ VULN_RULES = [
     Rule("VULN-JS-TLS-VERIFY-OFF", "TLS verification disabled", "high", "vulnerability",
          "Certificate verification is disabled",
          re.compile(r"rejectUnauthorized\s*:\s*false"), exts=JS),
+    Rule("VULN-JAVA-RUNTIME-EXEC", "Runtime.exec() call", "high", "vulnerability",
+         "Runtime.exec() with untrusted input enables command injection",
+         re.compile(r"\bRuntime\.getRuntime\(\)\.exec\s*\("), exts=JAVA),
+    Rule("VULN-JAVA-OBJECT-DESERIALIZATION", "ObjectInputStream deserialization", "high", "vulnerability",
+         "Deserializing untrusted data can execute arbitrary code",
+         re.compile(r"\bnew\s+ObjectInputStream\s*\("), exts=JAVA),
+    Rule("VULN-JAVA-WEAK-HASH", "Weak hash (MD5/SHA1)", "medium", "vulnerability",
+         "MD5 and SHA1 are weak for security purposes",
+         re.compile(r"MessageDigest\.getInstance\s*\(\s*[\"'](?:MD5|SHA1|SHA-1)[\"']"), exts=JAVA),
+    Rule("VULN-JAVA-TRUST-ALL-CERTS", "TLS verification disabled", "high", "vulnerability",
+         "A permissive TrustManager disables certificate verification",
+         re.compile(r"\bX509TrustManager\b"), exts=JAVA),
+    Rule("VULN-JAVA-SQL-CONCAT", "SQL built with string concatenation", "medium", "vulnerability",
+         "Use PreparedStatement instead of concatenating SQL strings",
+         re.compile(r"(?i)\.(?:execute|executeQuery|executeUpdate)\s*\(\s*\"[^\"]*\"\s*\+"), exts=JAVA),
+    Rule("VULN-GO-EXEC-COMMAND", "exec.Command with shell", "high", "vulnerability",
+         "Running a shell via exec.Command enables command injection",
+         re.compile(r"exec\.Command\s*\(\s*\"(?:sh|bash|cmd|powershell)\""), exts=GO),
+    Rule("VULN-GO-WEAK-HASH", "Weak hash (MD5/SHA1)", "medium", "vulnerability",
+         "MD5 and SHA1 are weak for security purposes",
+         re.compile(r"\b(?:md5|sha1)\.(?:New|Sum)\s*\("), exts=GO),
+    Rule("VULN-GO-TLS-VERIFY-OFF", "TLS verification disabled", "high", "vulnerability",
+         "Certificate verification is disabled",
+         re.compile(r"InsecureSkipVerify\s*:\s*true"), exts=GO),
+    Rule("VULN-GO-SQL-SPRINTF", "SQL built with fmt.Sprintf", "medium", "vulnerability",
+         "Use parameterized queries instead of formatting SQL strings",
+         re.compile(r"(?i)(?:db|tx)\.(?:Query|Exec)(?:Context)?\s*\(\s*(?:ctx,\s*)?fmt\.Sprintf"), exts=GO),
 ]
+
+# --------------------------------------------------------------------------
+# Config / infra security (Dockerfiles, docker-compose, generic headers)
+# --------------------------------------------------------------------------
+CONFIG_RULES = [
+    Rule("CONFIG-DOCKER-LATEST-TAG", "Dockerfile base image pinned to :latest", "medium", "config",
+         "Pin a specific image tag/digest instead of :latest for reproducible builds",
+         re.compile(r"(?im)^\s*FROM\s+\S+:latest\b"), names=DOCKERFILE_NAMES),
+    Rule("CONFIG-DOCKER-NO-USER", "Dockerfile runs as root", "medium", "config",
+         "No USER instruction found; the container runs as root by default",
+         re.compile(r"(?im)^\s*USER\s+"), names=DOCKERFILE_NAMES),
+    Rule("CONFIG-DOCKER-ADD-REMOTE", "Dockerfile ADD from a remote URL", "medium", "config",
+         "ADD with a URL skips layer caching and build-time verification; prefer curl/COPY",
+         re.compile(r"(?im)^\s*ADD\s+https?://"), names=DOCKERFILE_NAMES),
+    Rule("CONFIG-COMPOSE-PRIVILEGED", "docker-compose service runs privileged", "high", "config",
+         "privileged: true gives the container full access to the host",
+         re.compile(r"(?i)\bprivileged\s*:\s*true\b"), names=COMPOSE_NAMES),
+    Rule("CONFIG-COMPOSE-HOST-NETWORK", "docker-compose service uses host networking", "medium", "config",
+         "network_mode: host removes network isolation from the container",
+         re.compile(r"(?i)\bnetwork_mode\s*:\s*[\"']?host[\"']?"), names=COMPOSE_NAMES),
+    Rule("CONFIG-COMPOSE-DOCKER-SOCK", "Docker socket mounted into a container", "high", "config",
+         "Mounting /var/run/docker.sock grants the container control over the host's Docker daemon",
+         re.compile(r"/var/run/docker\.sock"), names=COMPOSE_NAMES),
+    Rule("CONFIG-CORS-WILDCARD", "CORS allows any origin", "medium", "config",
+         "A wildcard CORS origin allows any website to call this API with credentials",
+         re.compile(r"(?i)Access-Control-Allow-Origin[\"']?\s*[:=]\s*[\"']\*[\"']|"
+                    r"\borigins?\s*=\s*[\"']\*[\"']|CORS\([^)]*origins?\s*=\s*[\"']\*[\"']")),
+]
+
+# Config rules where the finding means "this instruction is absent from the
+# whole file" are checked once per file rather than per matching line.
+CONFIG_WHOLE_FILE_ABSENCE = {"CONFIG-DOCKER-NO-USER"}
+
+# --------------------------------------------------------------------------
+# Dependency hygiene (version pinning in manifests)
+# --------------------------------------------------------------------------
+DEPENDENCY_UNPINNED = Rule(
+    "DEPENDENCY-UNPINNED-VERSION", "Unpinned dependency version", "low", "dependency",
+    "No version constraint; a future release could introduce breaking or malicious changes")
+DEPENDENCY_WILDCARD = Rule(
+    "DEPENDENCY-WILDCARD-VERSION", "Wildcard/latest dependency version", "medium", "dependency",
+    "A '*' or 'latest' version accepts any future release, including compromised ones")
+DEPENDENCY_RULES = [DEPENDENCY_UNPINNED, DEPENDENCY_WILDCARD]
 
 # --------------------------------------------------------------------------
 # Licenses. Order matters: AGPL and LGPL texts reference the GPL, so they
@@ -188,4 +291,5 @@ def classify_spdx(expression: str) -> List[Rule]:
 
 
 def all_rules() -> List[Rule]:
-    return list(SECRET_RULES) + SENSITIVE_FILE_RULES + list(VULN_RULES) + list(LICENSE_RULES)
+    return (list(SECRET_RULES) + SENSITIVE_FILE_RULES + list(VULN_RULES) + list(LICENSE_RULES)
+            + list(CONFIG_RULES) + list(DEPENDENCY_RULES))

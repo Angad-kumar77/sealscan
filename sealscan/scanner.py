@@ -24,6 +24,8 @@ SKIP_EXTS = {
 }
 MANIFESTS = {"package.json", "composer.json", "pyproject.toml", "setup.py",
              "setup.cfg", "cargo.toml"}
+DEP_VERSION_OP = re.compile(r"==|>=|<=|~=|!=|>|<")
+DEP_NAME = re.compile(r"^\s*([A-Za-z0-9_.\-\[\]]+)")
 MAX_FILE_SIZE = 1_000_000
 MAX_LINE_LENGTH = 2000
 IGNORE_MARKER = "sealscan:ignore"
@@ -173,6 +175,54 @@ def _scan_manifest(name: str, text: str, rel: str) -> List[Finding]:
     return findings
 
 
+def _scan_config(name: str, text: str, rel: str) -> List[Finding]:
+    findings: List[Finding] = []
+    for rule in R.CONFIG_RULES:
+        if rule.names is not None and name not in rule.names:
+            continue
+        if rule.id in R.CONFIG_WHOLE_FILE_ABSENCE:
+            # "generic" here is reused to mean: finding = pattern NOT present anywhere.
+            if not rule.pattern.search(text):
+                findings.append(_finding(rule, rel, 1, name))
+            continue
+        for lineno, line in enumerate(text.splitlines(), start=1):
+            if rule.pattern.search(line):
+                findings.append(_finding(rule, rel, lineno, line.strip()[:120]))
+    return findings
+
+
+def _scan_dependency_manifest(name: str, text: str, rel: str) -> List[Finding]:
+    findings: List[Finding] = []
+    if name == "requirements.txt":
+        for lineno, raw in enumerate(text.splitlines(), start=1):
+            line = raw.strip()
+            if not line or line.startswith(("#", "-")) or "://" in line:
+                continue
+            if line.endswith("*"):
+                findings.append(_finding(R.DEPENDENCY_WILDCARD, rel, lineno, line[:120]))
+            elif not DEP_VERSION_OP.search(line):
+                m = DEP_NAME.match(line)
+                pkg = m.group(1) if m else line
+                findings.append(_finding(R.DEPENDENCY_UNPINNED, rel, lineno, pkg[:120]))
+    elif name == "package.json":
+        try:
+            data = json.loads(text)
+        except ValueError:
+            return findings
+        if not isinstance(data, dict):
+            return findings
+        for section in ("dependencies", "devDependencies"):
+            deps = data.get(section)
+            if not isinstance(deps, dict):
+                continue
+            for pkg, version in deps.items():
+                if not isinstance(version, str):
+                    continue
+                if version in ("*", "latest", "x"):
+                    findings.append(_finding(R.DEPENDENCY_WILDCARD, rel, 1, f"{pkg}: {version}"))
+    return findings
+
+
 def scan_file(path: Path, base: Path, opts: ScanOptions) -> List[Finding]:
     try:
         rel = path.relative_to(base).as_posix()
@@ -202,6 +252,10 @@ def scan_file(path: Path, base: Path, opts: ScanOptions) -> List[Finding]:
     findings.extend(_scan_lines(text, rel, ext, opts))
     if "license" in cats and name in MANIFESTS:
         findings.extend(_scan_manifest(name, text, rel))
+    if "config" in cats:
+        findings.extend(_scan_config(name, text, rel))
+    if "dependency" in cats and name in R.DEPENDENCY_MANIFESTS:
+        findings.extend(_scan_dependency_manifest(name, text, rel))
     return findings
 
 
